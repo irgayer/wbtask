@@ -1,0 +1,128 @@
+<label for="searchInput">Search:</label>
+<input type="text" id="searchInput" placeholder="Enter file name...">
+<button onclick="searchFiles()">Search</button>
+
+<table>
+    <thead>
+    <tr>
+        <th>Mode</th>
+        <th>LastWriteTime</th>
+        <th>Length</th>
+        <th>Name</th>
+        <th>Action</th>
+    </tr>
+    </thead>
+    <tbody id="fileTableBody"></tbody>
+</table>
+
+<script>
+    // Function to handle the download button click
+    const handleDownload = (fileName) => {
+        // Make an API request to download the file
+        fetch(`/download-file?file=${fileName}`)
+            .then(response => {
+                if (response.ok) {
+                    // If the response is successful, initiate the download
+                    return response.blob();
+                }
+                throw new Error('Failed to download file');
+            })
+            .then(blob => {
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = fileName;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                window.URL.revokeObjectURL(url);
+            })
+            .catch(error => console.error('Error downloading file:', error));
+    };
+
+    // Function to handle the search button click
+    const searchFiles = () => {
+        const searchQuery = document.getElementById('searchInput').value;
+
+        // Make an API request to your Go server with the search query
+        fetch(`/get-files?find=${searchQuery}`)
+            .then(response => response.text())
+            .then(data => {
+                // Split the data into lines
+                const lines = data.split('\n');
+
+                // Remove empty lines
+                const nonEmptyLines = lines.filter(line => line.trim() !== '').slice(3, lines.length);
+
+                // Get the table body element
+                const tableBody = document.getElementById('fileTableBody');
+
+                // Clear the existing table rows
+                tableBody.innerHTML = '';
+
+                // Populate the table dynamically with the filtered data
+                nonEmptyLines.forEach(line => {
+                    const columns = line.trim().split(/\s+/);
+                    const tableRow = document.createElement('tr');
+
+                    columns.forEach((column, index) => {
+                        const tableData = document.createElement('td');
+                        tableData.textContent = column;
+                        tableRow.appendChild(tableData);
+
+                        // Add "Download" button to the last column
+                        if (index === columns.length - 1) {
+                            const downloadButton = document.createElement('button');
+                            downloadButton.textContent = 'Download';
+                            downloadButton.addEventListener('click', () => handleDownload(column));
+                            const actionCell = document.createElement('td');
+                            actionCell.appendChild(downloadButton);
+                            tableRow.appendChild(actionCell);
+                        }
+                    });
+
+                    tableBody.appendChild(tableRow);
+                });
+            })
+            .catch(error => console.error('Error fetching files:', error));
+    };
+
+    // Initial fetch without a search query
+    fetch('/get-files')
+        .then(response => response.text())
+        .then(data => {
+            // Split the data into lines
+            const lines = data.split('\n');
+
+            // Remove empty lines
+            const nonEmptyLines = lines.filter(line => line.trim() !== '').slice(3, lines.length);
+
+            // Get the table body element
+            const tableBody = document.getElementById('fileTableBody');
+
+            // Populate the table dynamically
+            nonEmptyLines.forEach(line => {
+                const columns = line.trim().split(/\s+/);
+                const tableRow = document.createElement('tr');
+
+                columns.forEach((column, index) => {
+                    const tableData = document.createElement('td');
+                    tableData.textContent = column;
+                    tableRow.appendChild(tableData);
+
+                    // Add "Download" button to the last column
+                    if (index === columns.length - 1) {
+                        const downloadButton = document.createElement('button');
+                        downloadButton.textContent = 'Download';
+                        downloadButton.addEventListener('click', () => handleDownload(column));
+                        const actionCell = document.createElement('td');
+                        actionCell.appendChild(downloadButton);
+                        tableRow.appendChild(actionCell);
+                    }
+                });
+
+                tableBody.appendChild(tableRow);
+            });
+        })
+        .catch(error => console.error('Error fetching files:', error));
+</script>

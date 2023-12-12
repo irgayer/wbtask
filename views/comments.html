@@ -1,0 +1,11 @@
+<ul id="commentsList">
+    {{ range .comments }}
+        <li>{{.UserName}} said: <br>{{.Text}} <br><small>id of comment : {{.ID}}</small></li>
+    {{ end }}
+</ul>
+
+<form method="post" action="/comments">
+    <label for="commentInput">Add Comment:</label>
+    <input type="text" id="commentInput" name="text" placeholder="Enter your comment...">
+    <button type="submit">Submit</button>
+</form>

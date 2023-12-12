@@ -4,32 +4,118 @@ go run main.go
 ```
 Не знаю нужно ли устанавливать пакеты. 
 
-# Proof of concept
+# Комментарии к исправлениям
 ### XSS
-После успешного логина, переходим по пути `/comments` и оставляем комметарий как `<script>alert(1)</script>`. При обновлении страницы ~~увидим всплывающее окно с текстом `1`~~ ничего не увидим, потому что движок рендера страниц автоматически экранирует строки. На самом деле я бы мог попытаться получше, но мне было лень.
-
-### IDOR
-Оставляем комментарий, отправляем запрос:
-```bash
-curl -X PATCH -H "Content-Type: application/json" -d '{"Text":"STRINGSTRING"}' http://localhost:3000/comments/1
+После создания REST API и когда все нормальные компании поделились на front и back команды, XSS стал не так страшен лично для меня, но теперь это проблема front-end разработчиков.
+По рекомендациям: использовать функции/методы для экранирования. В python есть замечательная функция:
+```python
+shlex.quote() // Встретилась на соревновании. Невозможно сломать(?).
 ```
-Видим, что коммент изменился без всякой авторизации и проверок.
+### IDOR
+После прочтения статьи на хабре, как-то вспомнил свои прошлые проекты и не везде была защита от "самого умного"
+человека на свете :D. Должна быть проверка на access у пользователя. 
+```csharp
+// Должно быть что-то типа того, код написан на C#.
+comment = _commentsRepository.GetById(id);
+if (comment is null)
+    throw new EntityNotFoundException(typeof(Comment), id);
 
+if (comment.UserId != _authContext.UserId)
+    throw new AccessDeniedException(...);
+    
+// Продолжение.
+```
 ### SQLI
-Переходим на страницу логина `/login` в поле логина пишем `'0'; drop table comments --`, дропаем таблицу комментариев.
+Современные ORM библиотеки сами экранируют запросы, но в данном случае, я СПЕЦИАЛЬНО закодил SQLI, чтобы показать, что это плохо.
+```go
+// https://gorm.io/docs/security.html
+userInput := "jinzhu;drop table users;"
+// safe, will be escaped
+db.Where("name = ?", userInput).First(&user)
+
+// SQL injection
+db.Where(fmt.Sprintf("name = %v", userInput)).First(&user)
+```
 
 ### OS Command Injection
-Переходим на страницу файлов `/files` и в поле ввода пишем `0; ls ../../`, получаем список файлов дедовской директории, но этим всё не ограничивается.
-
+Плохая идея вообще вызывать какие-то команды операционной системы, но если очень надо, то нужно экранировать входные данные.
 ### Path Traversal
-Можно просто долбануть `localhost:3000/download-file?file=../main.go` и получить исходник.
-
+Похоже на OS Command Injection, но тут нужно экранировать пути. 
 ### Brute Force
-Ничего не делал. Но там нет ни ограничений по запросам, ни блеклиста, поэтому смело открываем бурпсуит и закидываем пейлоуд.
+1) В проекте возвращается четкая ошибка "User does not exists" и "Incorrect password", это неправильно, но нужно было показать вектор. 
+2) Blocklist/Whitelist (работа DevOps'ов. Удачи им!), ограничение запросов. 
+# Дополнительные комментарии 
+Не успел сделать проект по-нормальному из-за семейных обстоятельств. Надо было просить скинуть задание в понедельник.
+1) Хотелось Domain, Application, Infrastructure, UI layers, но на Go опыта не имею.
+2) По кривому Auth: добавил бы контекст AuthContext interface:
+```csharp
+// В C# это выглядит так.
+// Он инициализируется на этапе запроса, считывая токен из заголовка.
+// А еще там есть аттрибут Authorize, который проверяет, что пользователь авторизован.
+public interface IAuthContext
+{
+    int UserId { get; }
+    bool IsAuthenticated { get; }
+} 
 
-# Дополнительные комментарии
-В этом проекте неправильно всё. Из-за одной уязвимости XSS, пришлось использовать template engine.  
-1) На самом деле основную структуру взял у `https://github.com/NikSchaefer/gofiber-boilerplate/tree/main`.
-2) Потому что это мой первый проект на Go, взял самый знакомый фреймворк Fiber, потому что он похож на Express.
-3) Без правильного ООП, мой мозг взорвался.
-4) По архитектуре - в другой ветке!
+// Пример использования.
+public class UpdateCommentRequest : IRequest<Unit>
+{
+    public int Id { get; set; }
+    public string Text { get; set; }
+}
+
+public class UpdateCommentRequestHandler : IRequestHandler<UpdateCommentRequest, Unit>
+{
+    private readonly IAuthContext _authContext;
+    // Использование Repository и UnitOfWork очень холиварная тема, готов долго с вами спорить.
+    private readonly ICommentsRepository _commentsRepository;
+
+    public UpdateCommentRequestHandler(IAuthContext authContext, ICommentsRepository commentsRepository)
+    {
+        _authContext = authContext;
+        _commentsRepository = commentsRepository;
+    }
+
+    public async Task<Unit> Handle(UpdateCommentRequest request, CancellationToken cancellationToken)
+    {
+        var comment = await _commentsRepository.GetById(request.Id);
+        if (comment is null)
+            throw new EntityNotFoundException(typeof(Comment), request.Id);
+
+        if (comment.UserId != _authContext.UserId)
+            throw new AccessDeniedException(...);
+
+        comment.Text = request.Text;
+        await _commentsRepository.Update(comment);
+
+        return Unit.Value;
+    }
+}
+
+// В контроллере.
+[Authorize]
+[HttpPatch("{id}")]
+public async Task<IActionResult> UpdateComment(int id, [FromBody] UpdateCommentRequest request)
+{
+    request.Id = id;
+    await _mediator.Send(request);
+    return Ok();
+}
+```
+3) В целом задание показалось очень очевидным и скучным, которое не отражает реальность. Уже не стал фиксить уязвимости, потому что это очевидно исправляется.
+4) Не делал тесты, но в реальном проекте они были бы обязательно (Unit, Functional, Integration всё как вы любите).
+5) Ииии это мой первый проект на Go, поэтому не судите строго.
+
+# P.S
+- [x] Имею опыт участия в разработке микросервисных проектов с нуля по DDD.
+- [x] Больше интересна архитектура программного обеспечения, но на эту стажировку записался из-за интереса, т.к. много друзей учится на Cyber Security.
+- [x] Имею опыт участия на CTF.
+- [x] Имею опыт участия на хакатонах, в том числе Blockchain.
+
+# P.P.S Умею, практикую.
+- [X] Jira, Confluence
+- [x] Git proficient user
+- [x] Docker
+
+Более подробно в резюме. Thx.
